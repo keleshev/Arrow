@@ -114,23 +114,17 @@ _______________________________________________________________________________
 Arrow is using a ppx preprocessor to annotate tests with source code location information. Given the following test:
 
 ```ocaml
-let%test "Removing pineapple from pizza w/ many layers of pineapple gives pizza w/o one" =
-  Pizza.remove_pineapple Pizza.{toppings=Topping.[Pineapple; Salami; Pineapple]} =>
-    Pizza.{toppings=Topping.[Salami]}
+let%test "Removing pineapple from empty pizza does nothing" =
+  Pizza.remove_pineapple Pizza.empty => Pizza.empty
 ```
 
 It will convert it into the following form:
 
 ```ocaml
 let () =
-  Arrow.Internal.Test.register
-    ~file:__FILE__
-    ~lines:(14, 16)
-    ~source:"let%test \"Removing pineapple from pizza w/ many layers of pineapple gives pizza w/o one\" =
-  Pizza.remove_pineapple Pizza.{toppings=Topping.[Pineapple; Salami; Pineapple]} =>
-    Pizza.{toppings=Topping.[Salami]}"
+  Arrow.Internal.Test.register ~file:__FILE__ ~lines:(10, 11)
     ~test:(fun () ->
-      (=>) ~__arrow_library_implicit_argument_populated_by_ppx_do_not_rely__:(15, 15)
-        (Pizza.remove_pineapple Pizza.{toppings=Topping.[Pineapple; Salami; Pineapple]})
-        (Pizza.{toppings=Topping.[Salami]}))
+      (=>) ~__loc__:(15, 15) (Pizza.remove_pineapple Pizza.empty) Pizza.empty)
+    ~source:"let%test \"Removing pineapple from empty pizza does nothing\" =
+  Pizza.remove_pineapple Pizza.empty => Pizza.empty"
 ```
