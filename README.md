@@ -3,7 +3,7 @@ Arrow: OCaml testing library based on diffing s-expressions
 
 Arrow takes advantage of values that can be converted to s-expressions in order
 to present a failing test case as a diff of two s-expressions. It also uses a
-ppx preprocessor in order to annotate your tests with sourcecode location
+ppx preprocessor in order to annotate your tests with source code location
 information.
 
 [!img]
@@ -43,6 +43,7 @@ Now let's write a few tests. First using Arrow with polymorphic comparison:
 
 ```ocaml
 let (=>) = Arrow.(=>)
+
 
 let%test "Removing pineapple from empty pizza does nothing" =
   Pizza.remove_pineapple Pizza.empty => Pizza.empty
@@ -106,4 +107,30 @@ _______________________________________________________________________________
 
 ((toppings (Salami -Pineapple)))
 _______________________________________________________________________________
+```
+
+## Internals
+
+Arrow is using a ppx preprocessor to annotate tests with source code location information. Given the following test:
+
+```ocaml
+let%test "Removing pineapple from pizza w/ many layers of pineapple gives pizza w/o one" =
+  Pizza.remove_pineapple Pizza.{toppings=Topping.[Pineapple; Salami; Pineapple]} =>
+    Pizza.{toppings=Topping.[Salami]}
+```
+
+It will convert it into the following form:
+
+```ocaml
+let () =
+  Arrow.Internal.Test.register
+    ~file:__FILE__
+    ~lines:(14, 16)
+    ~source:"let%test \"Removing pineapple from pizza w/ many layers of pineapple gives pizza w/o one\" =
+  Pizza.remove_pineapple Pizza.{toppings=Topping.[Pineapple; Salami; Pineapple]} =>
+    Pizza.{toppings=Topping.[Salami]}"
+    ~test:(fun () ->
+      (=>) ~__arrow_library_implicit_argument_populated_by_ppx_do_not_rely__:(15, 15)
+        (Pizza.remove_pineapple Pizza.{toppings=Topping.[Pineapple; Salami; Pineapple]})
+        (Pizza.{toppings=Topping.[Salami]}))
 ```
