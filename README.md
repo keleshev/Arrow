@@ -111,20 +111,39 @@ _______________________________________________________________________________
 
 ## Internals
 
-Arrow is using a ppx preprocessor to annotate tests with source code location information. Given the following test:
+Arrow is using a ppx preprocessor to annotate tests with source code location
+information. Given the following test:
 
 ```ocaml
-let%test "Removing pineapple from empty pizza does nothing" =
-  Pizza.remove_pineapple Pizza.empty => Pizza.empty
+let%test "name" =
+  let n = 4 in
+  1 + 3 => n;
+  2 + 2 => n;
+  3 + 1 => n
 ```
 
 It will convert it into the following form:
 
 ```ocaml
 let () =
-  Arrow.Internal.Test.register ~file:__FILE__ ~lines:(10, 11)
+  Arrow.Internal.register
+    ~file:__FILE__
+    ~header:(10, 10) (* Line range with the header `let%test "name" =` *)
+    ~body:(11, 14) (* Line range of the body of the test *)
+    ~source:[| (* Bundle source; original source file can be unreachable *)
+      "let%test \"name\" =";
+      "  let n = 4 in";
+      "  1 + 3 => n;";
+      "  2 + 2 => n;";
+      "  3 + 1 => n";
+    |]
+    ~markers:[|12; 13|] (* Line numbers where tracking markers are set *)
     ~test:(fun () ->
-      (=>) ~__loc__:(15, 15) (Pizza.remove_pineapple Pizza.empty) Pizza.empty)
-    ~source:"let%test \"Removing pineapple from empty pizza does nothing\" =
-  Pizza.remove_pineapple Pizza.empty => Pizza.empty"
+      let n = 4 in
+      1 + 3 => n;
+      Arrow.Internal.marker 0; (* Indecies into markers array above *)
+      2 + 2 => n;
+      Arrow.Internal.marker 1;
+      3 + 1 => n
+    )
 ```

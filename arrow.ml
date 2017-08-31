@@ -66,4 +66,9 @@ let () = !"Major difference between an atom and a list"
       Some (Major {addition=(pair hai bye); deletion=hai})
 
 
+(*
 
+foo => bar                +foo -bar
+(foo bar) => (foo)        (foo +bar)
+
+*)
