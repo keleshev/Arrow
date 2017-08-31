@@ -1,3 +1,8 @@
+let (=>) left right = print_char (if left = right then '.' else 'F')
+
+
+
+
 module Sexp = struct
   type t = Atom of string | List of t list
 end
@@ -28,11 +33,12 @@ end
 
 
 
-let diff: Sexp.t -> Sexp.t -> Difference.t option = fun left right ->
+let rec diff: Sexp.t list -> Sexp.t list -> 'a = fun left right ->
   match left, right with
-  | left, right when left = right -> None
-  | Atom _, Atom _ | Atom _, List _ | List _, Atom _ ->
-      Some Difference.(Major {addition=left; deletion=right})
+  | [], right -> List.map (fun sexp -> `Addition sexp) right
+  | left, [] -> List.map (fun sexp -> `Deletion sexp) left
+  | x :: xs, y :: ys ->
+      if x = y then `Equality x :: diff xs ys else []
   | _ -> assert false
 
 
@@ -40,7 +46,6 @@ let diff: Sexp.t -> Sexp.t -> Difference.t option = fun left right ->
 
 
 
-let (=>) left right = print_char (if left = right then '.' else 'F')
 
 let pair a b = Sexp.List [a; b]
 
@@ -51,8 +56,12 @@ open Difference
 let (!) _ = ()
 
 let () = !"No difference between equal atoms"
-  ; diff hai hai => None
+  ; diff [] [hai; bye] => [`Addition hai; `Addition bye]
+  ; diff [hai; bye] [] => [`Deletion hai; `Deletion bye]
+  ; diff [] [] => []
+  ; diff [hai; bye] [hai] => [`Equality hai; `Deletion bye]
 
+(*
 let () = !"No difference between equal lists"
   ; diff (pair hai bye) (pair hai bye) => None
 
@@ -71,4 +80,4 @@ let () = !"Major difference between an atom and a list"
 foo => bar                +foo -bar
 (foo bar) => (foo)        (foo +bar)
 
-*)
+*)*)
