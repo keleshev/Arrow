@@ -1,36 +1,8 @@
-let (=>) left right = print_char (if left = right then '.' else 'F')
-
-
-
 
 module Sexp = struct
   type t = Atom of string | List of t list
 end
 open Sexp
-
-module Difference = struct
-
-
-  module Direction = struct
-    type t = Addition | Deletion
-  end
-
-  module Minor = struct
-    type t =
-      | One of Direction.t * Sexp.t
-      | Many of t list
-  end
-
-  type t =
-    (* `addition` and `deletion` cannot be equal, cannot be both lists *)
-    | Major of {addition: Sexp.t; deletion: Sexp.t}
-    | Minor of Minor.t
-
-
-end
-
-
-
 
 let minimize ~cost (head :: tail) =
   List.fold_left
@@ -92,32 +64,26 @@ let rec diff: Sexp.t list -> Sexp.t list -> 'a = fun left right ->
         Deletion x :: Addition y :: diff xs ys;
       ]
 
+module Test: sig end = struct
+  let (=>) left right = print_char (if left = right then '.' else 'F')
+  let (!) _ = ()
 
+  let pair a b = Sexp.List [a; b]
 
+  let a, b, c = Atom "a", Atom "b", Atom "c"
+  let x, y, z = Atom "x", Atom "y", Atom "z"
 
+  let () = !"Cost function counts number of atoms"
+    ; cost [Addition a; Deletion b; Equality a; Interior [Equality b]] => 4
 
-
-
-let pair a b = Sexp.List [a; b]
-
-let hai, bye = Sexp.(Atom "hai", Atom "bye")
-let a, b, c = Sexp.(Atom "a", Atom "b", Atom "c")
-let x, y, z = Sexp.(Atom "x", Atom "y", Atom "z")
-
-open Difference
-
-let (!) _ = ()
-
-let () = !"Cost function counts number of atoms"
-  ; cost [Addition a; Deletion b; Equality a; Interior [Equality b]] => 4
-
-let () = !"No difference between equal atoms"
-  ; diff [] [] => []
-  ; diff [] [a; b] => [Addition a; Addition b]
-  ; diff [a; b] [] => [Deletion a; Deletion b]
-  ; diff [a; b] [a] => [Equality a; Deletion b]
-  ; diff [a; b] [a; b] => [Equality a; Equality b]
-  ; diff [a; x; a; b; b; a] [a; b; b; a] =>
-      [Equality a; Deletion x; Deletion a; Equality b; Equality b; Equality a]
-  ; diff [List [a; List [b; c]]] [List [a; List [b]]] =>
-      [Interior [Equality a; Interior [Equality b; Deletion c]]]
+  let () = !"Test diff"
+    ; diff [] [] => []
+    ; diff [] [a; b] => [Addition a; Addition b]
+    ; diff [a; b] [] => [Deletion a; Deletion b]
+    ; diff [a; b] [a] => [Equality a; Deletion b]
+    ; diff [a; b] [a; b] => [Equality a; Equality b]
+    ; diff [a; x; a; b; b; a] [a; b; b; a] =>
+        [Equality a; Deletion x; Deletion a; Equality b; Equality b; Equality a]
+    ; diff [List [a; List [b; c]]] [List [a; List [b]]] =>
+        [Interior [Equality a; Interior [Equality b; Deletion c]]]
+end
