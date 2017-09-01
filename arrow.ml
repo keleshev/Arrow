@@ -21,22 +21,22 @@ type t =
   | Equality of Sexp.t
   | Interior of t list
 
-let rec single_cost = function
-  | Addition x | Deletion x | Equality x -> count_atoms x
-  | Interior list -> sum (List.map single_cost list)
+let rec cost = function
+  | [] -> 0
+  | (Addition x | Deletion x | Equality x) :: tail -> count_atoms x + cost tail
+  | Interior list :: tail -> cost list + cost tail
 
-let cost list = single_cost (Interior list)
-
-let rec single_debug = function
-  | Addition (Sexp.Atom a) -> "+" ^ a
-  | Deletion (Sexp.Atom a) -> "-" ^ a
-  | Equality (Sexp.Atom a) -> a
-  | Addition x -> "+" ^ "(...)"
-  | Deletion x -> "-" ^ "(...)"
-  | Equality x -> "(...)"
-  | Interior list -> List.fold_left (^) "" (List.map single_debug list)
-
-let debug list = single_debug (Interior list)
+let debug list =
+  let rec go = function
+    | Addition (Sexp.Atom a) -> "+" ^ a
+    | Deletion (Sexp.Atom a) -> "-" ^ a
+    | Equality (Sexp.Atom a) -> a
+    | Addition x -> "+" ^ "(...)"
+    | Deletion x -> "-" ^ "(...)"
+    | Equality x -> "(...)"
+    | Interior list -> String.concat " " (List.map go list)
+  in
+  go (Interior list)
 
 let rec diff: Sexp.t list -> Sexp.t list -> 'a = fun left right ->
   match left, right with
