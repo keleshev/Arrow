@@ -15,6 +15,26 @@ let rec count_atoms = function
   | Sexp.Atom _ -> 1
   | Sexp.List list -> sum (List.map count_atoms list)
 
+type 'a tree = One of 'a | Many of 'a tree list
+type direction = Addition | Deletion | Equality
+type t = (direction * Sexp.t) tree
+
+let rec cost = function
+  | [] -> 0
+  | One (_, sexp) :: tail -> count_atoms sexp + cost tail
+  | Many list :: tail -> cost list + cost tail
+
+let debug list =
+  let debug_direction = function Addition -> "+" | Deletion -> "-" | Equality -> "" in
+  let rec go = function
+    | One (direction, Sexp.Atom a) -> debug_direction direction ^ a
+    | One (direction, _) -> debug_direction direction ^ "(...)"
+    | Many list -> String.concat " " (List.map go list)
+  in
+  go (Many list)
+
+(* vs. *)
+
 type t =
   | Addition of Sexp.t
   | Deletion of Sexp.t
@@ -63,6 +83,10 @@ let rec diff: Sexp.t list -> Sexp.t list -> 'a = fun left right ->
         Addition y :: diff left ys;
         Deletion x :: Addition y :: diff xs ys;
       ]
+
+
+let fprintf = Format.fprintf
+
 
 module Test: sig end = struct
   let (=>) left right = print_char (if left = right then '.' else 'F')
