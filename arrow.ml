@@ -1,17 +1,61 @@
 
 let sum = List.fold_left (+) 0
 let (>>) f g x = g (f x)
+let const x _ = x
+let id x = x
+(* let join = String.concat " " *)
+(* let parenthesize = Printf.sprintf "(%s)" *)
+
+let fprintf = Format.fprintf
+let format_list list =
+  Format.pp_print_list ~pp_sep:Format.pp_print_space list
+
+module Color = struct
+  let escape = Format.sprintf "\027[%dm"
+
+  let reset = escape 0
+
+  let red = escape 31
+  let green = escape 32
+  let yellow = escape 33
+
+  module Format = struct
+    let create code format_child f child =
+      fprintf f "%s%a%s" (escape code) format_child child (escape 0)
+
+    let red c = create 31 c
+    let green c = create 32 c
+    let yellow = create 33
+  end
+end
 
 module Sexp = struct
   type t = Atom of string | List of t list
 
-  let rec size = function
-    | Atom _ -> 1
-    | List list -> sum (List.map size list)
+  let rec fold ~atom ~list = function
+    | Atom a -> atom a
+    | List l -> list (List.map (fold ~atom ~list) l)
 
-  let rec to_string = function
-    | Atom a -> a
-    | List list -> "(" ^ String.concat " " (List.map to_string list) ^ ")"
+  let size = fold ~atom:(const 1) ~list:sum
+
+
+  let rec format f = function
+    | Atom a -> fprintf f "%s" a
+    | List l -> fprintf f "@[<hv 1>(%a)@]" (format_list format) l
+
+  let to_string = Format.asprintf "%a" format
+end
+
+module Test = struct
+  open Sexp
+
+  let (=>) left right = print_char (if left = right then '.' else 'F')
+
+  let a, b, c = Atom "a", Atom "b", Atom "c"
+
+  let () = ()
+    ; to_string (List [a; List [b; c]; List [a; List [b]]]) =>
+        "(a (b c) (a (b)))"
 end
 
 let minimize ~cost (head :: tail) =
@@ -32,8 +76,30 @@ module Direction = struct
   let to_string = function Addition -> "+" | Deletion -> "-" | Equality -> ""
 end
 
-module Difference = struct
-  type t = (Direction.t * Sexp.t) Tree.t
+module Directed = struct
+  type 'a t = Direction.t * 'a
+
+  let format f = function
+    | Direction.Addition, sexp ->
+        fprintf f "%a" (Color.Format.green Sexp.format) sexp
+    | Direction.Deletion, sexp ->
+        fprintf f "%a" (Color.Format.red Sexp.format) sexp
+    | Direction.Equality, sexp ->
+        fprintf f "%a" Sexp.format sexp
+
+end
+
+module Diff = struct
+  type t = Sexp.t Directed.t Tree.t
+
+  let rec format f = function
+    | Tree.One directed ->
+        fprintf f "%a" Directed.format directed
+(*         fprintf f "%s%a" (Direction.to_string direction) Sexp.format sexp *)
+    | Tree.Many list ->
+        fprintf f "@[<hv 1>(%a)@]" (format_list format) list
+
+  let to_string = Format.asprintf "%a" format
 end
 
 let cost' = Tree.fold ~one:(snd >> Sexp.size) ~many:sum
@@ -108,4 +174,9 @@ module Test = struct
     ; diff [a; b] [a; b] => "a b"
     ; diff [a; x; a; b; b; a] [a; b; b; a] => "a -x -a b b a"
     ; diff [List [a; List [b; c]]] [List [a; List [b]]] => "(a (b -c))"
+
+    ; print_endline @@ Diff.to_string
+        (Tree.Many (diff [List [a; List [b; c]]] [List [a; List [x; y]]]))
+    ; print_endline @@ Diff.to_string
+        (Tree.Many (diff [List [a; z]] [List [a; List [x; y]]]))
 end
