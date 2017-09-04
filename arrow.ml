@@ -38,7 +38,6 @@ module Sexp = struct
 
   let size = fold ~atom:(const 1) ~list:sum
 
-
   let rec format f = function
     | Atom a -> fprintf f "%s" a
     | List l -> fprintf f "@[<hv 1>(%a)@]" (format_list format) l
@@ -70,69 +69,90 @@ module Tree = struct
     | Many xs -> many (List.map (fold ~one ~many) xs)
 end
 
-module Direction = struct
-  type t = Addition | Deletion | Equality
+module Change = struct
+  type t =
+    | Equality of Sexp.t
+    | Addition of Sexp.t
+    | Deletion of Sexp.t
+    | Mutation of {deletion: Sexp.t; addition: Sexp.t}
 
-  let to_string = function Addition -> "+" | Deletion -> "-" | Equality -> ""
-end
+  let fold ~equality ~addition ~deletion ~mutation = function
+    | Equality sexp -> equality sexp
+    | Addition sexp -> addition sexp
+    | Deletion sexp -> deletion sexp
+    | Mutation {deletion=d; addition=a} -> mutation (deletion d) (addition a)
 
-module Directed = struct
-  type 'a t = Direction.t * 'a
+  let cost =
+    let size = Sexp.size in
+    fold ~equality:size ~addition:size ~deletion:size ~mutation:(+)
 
-  let format f = function
-    | Direction.Addition, sexp ->
-        fprintf f "%a" (Color.Format.green Sexp.format) sexp
-    | Direction.Deletion, sexp ->
-        fprintf f "%a" (Color.Format.red Sexp.format) sexp
-    | Direction.Equality, sexp ->
+  let rec format f = function
+    | Equality sexp ->
         fprintf f "%a" Sexp.format sexp
+    | Addition sexp ->
+        fprintf f "%a" (Color.Format.green Sexp.format) sexp
+    | Deletion sexp ->
+        fprintf f "%a" (Color.Format.red Sexp.format) sexp
+    | Mutation {deletion; addition} ->
+        fprintf f "%a@ %a" format (Deletion deletion) format (Addition addition)
 
+  let to_string = Format.asprintf "%a" format
+
+  let rec debug_format f = function
+    | Equality sexp ->
+        fprintf f "%a" Sexp.format sexp
+    | Addition sexp ->
+        fprintf f "+%a" Sexp.format sexp
+    | Deletion sexp ->
+        fprintf f "-%a" Sexp.format sexp
+    | Mutation {deletion; addition} ->
+        fprintf f "%a@ %a" format (Deletion deletion) format (Addition addition)
+
+  let debug = Format.asprintf "%a" debug_format
 end
 
 module Diff = struct
-  type t = Sexp.t Directed.t Tree.t
+  type t = Change.t Tree.t
 
   let rec format f = function
-    | Tree.One directed ->
-        fprintf f "%a" Directed.format directed
-(*         fprintf f "%s%a" (Direction.to_string direction) Sexp.format sexp *)
+    | Tree.One change ->
+        fprintf f "%a" Change.format change
     | Tree.Many list ->
         fprintf f "@[<hv 1>(%a)@]" (format_list format) list
 
   let to_string = Format.asprintf "%a" format
+
+  let cost = Tree.fold ~one:Change.cost ~many:sum
+
+  let rec debug = let open Tree in function
+    | One change -> Change.debug change
+    | Many list -> "(" ^ String.concat " " (List.map debug list) ^ ")"
 end
-
-let cost' = Tree.fold ~one:(snd >> Sexp.size) ~many:sum
-let cost list = cost' (Tree.Many list)
-
-let rec debug = let open Tree in function
-  | One (direction, sexp) -> Direction.to_string direction ^ Sexp.to_string sexp
-  | Many list -> "(" ^ String.concat " " (List.map debug list) ^ ")"
 
 module Test = struct
   let (=>) left right = print_char (if left = right then '.' else 'F')
   let a, b, c = Sexp.(Atom "a", Atom "b", Atom "c")
 
-  let () = let open Direction in ()
-    ; cost' Tree.(Many [
-        One (Equality, a);
-        One (Deletion, b);
-        Many [One (Addition, c)];
+  let () = let open Change in ()
+    ; Diff.cost Tree.(Many [
+        One (Equality a);
+        One (Deletion b);
+        Many [One (Addition c)];
       ]) => 3
 
-  let () = let open Direction in ()
-    ; debug Tree.(Many [
-        One (Equality, a);
-        Many [One (Equality, b); One (Deletion, c)];
+  let () = let open Change in ()
+    ; Diff.debug Tree.(Many [
+        One (Equality a);
+        Many [One (Equality b); One (Deletion c)];
       ]) => "(a (b -c))"
-
 end
 
 let rec diff: Sexp.t list -> Sexp.t list -> 'a Tree.t list = fun left right ->
-  let open Tree in let open Direction in
+  let open Tree in let open Change in
+  let cost list = Diff.cost (Tree.Many list) in
   match left, right with
-  | [], right -> List.map (fun sexp -> One (Addition, sexp)) right
-  | left, [] -> List.map (fun sexp -> One (Deletion, sexp)) left
+  | [], right -> List.map (fun sexp -> One (Addition sexp)) right
+  | left, [] -> List.map (fun sexp -> One (Deletion sexp)) left
   | x :: xs, y :: ys when x = y ->
      (*
         The fact that when x = y we declare it a non-change without considering
@@ -142,23 +162,23 @@ let rec diff: Sexp.t list -> Sexp.t list -> 'a Tree.t list = fun left right ->
         this might lead to not the best looking diffs, e.g.:
           (a x x x a b b a) vs. (a b b a) => (a -x -x -x -a b b a)
       *)
-     One (Equality, x) :: diff xs ys
+     One (Equality x) :: diff xs ys
   | Sexp.List ls as x :: xs, (Sexp.List ms as y) :: ys ->
       minimize ~cost [
-        One (Deletion, x) :: diff xs right;
-        One (Addition, y) :: diff left ys;
+        One (Deletion x) :: diff xs right;
+        One (Addition y) :: diff left ys;
         Many (diff ls ms) :: diff xs ys;
       ]
   | x :: xs, y :: ys ->
       minimize ~cost [
-        One (Deletion, x) :: diff xs right;
-        One (Addition, y) :: diff left ys;
-        One (Deletion, x) :: One (Addition, y) :: diff xs ys;
+        One (Deletion x) :: diff xs right;
+        One (Addition y) :: diff left ys;
+        One (Deletion x) :: One (Addition y) :: diff xs ys;
       ]
 
 module Test = struct
   let (=>) diffs string =
-    Test.(=>) (String.concat " " (List.map debug diffs)) string
+    Test.(=>) (String.concat " " (List.map Diff.debug diffs)) string
   let (!) _ = ()
 
   open Sexp
