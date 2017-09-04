@@ -58,7 +58,7 @@ module Test = struct
 end
 
 let minimize ~cost (head :: tail) =
-  let folder left right = if cost left < cost right then left else right in
+  let folder left right = if cost left <= cost right then left else right in
   List.fold_left folder head tail
 
 module Tree = struct
@@ -106,7 +106,9 @@ module Change = struct
     | Deletion sexp ->
         fprintf f "-%a" Sexp.format sexp
     | Mutation {deletion; addition} ->
-        fprintf f "%a@ %a" format (Deletion deletion) format (Addition addition)
+        fprintf f "%a %a"
+          debug_format (Deletion deletion)
+          debug_format (Addition addition)
 
   let debug = Format.asprintf "%a" debug_format
 end
@@ -123,10 +125,41 @@ module Diff = struct
   let to_string = Format.asprintf "%a" format
 
   let cost = Tree.fold ~one:Change.cost ~many:sum
+  let cost_list list = cost (Tree.Many list)
 
   let rec debug = let open Tree in function
     | One change -> Change.debug change
     | Many list -> "(" ^ String.concat " " (List.map debug list) ^ ")"
+
+  open Change
+  open Tree
+  open Sexp
+
+  let rec create: Sexp.t -> Sexp.t -> Change.t Tree.t = fun left right ->
+    match left, right with
+    | x, y when x = y -> One (Equality x)
+    | List xs, List ys -> Many (diff_list xs ys)
+    | deletion, addition -> One (Mutation {deletion; addition})
+
+  and diff_list: Sexp.t list -> Sexp.t list -> Change.t Tree.t list =
+    fun left right ->
+    match left, right with
+    | [], right -> List.map (fun sexp -> One (Addition sexp)) right
+    | left, [] -> List.map (fun sexp -> One (Deletion sexp)) left
+    | x :: xs, y :: ys when x = y ->
+        One (Equality x) :: diff_list xs ys
+    | (Sexp.List ls as x) :: xs, (Sexp.List ms as y) :: ys ->
+        minimize ~cost:cost_list [
+          One (Deletion x) :: diff_list xs right;
+          One (Addition y) :: diff_list left ys;
+          Many (diff_list ls ms) :: diff_list xs ys;
+        ]
+    | x :: xs, y :: ys ->
+        minimize ~cost:cost_list [
+          One (Deletion x) :: diff_list xs right;
+          One (Addition y) :: diff_list left ys;
+          One (Mutation {deletion=x; addition=y}) :: diff_list xs ys;
+        ]
 end
 
 module Test = struct
@@ -147,38 +180,8 @@ module Test = struct
       ]) => "(a (b -c))"
 end
 
-let rec diff: Sexp.t list -> Sexp.t list -> 'a Tree.t list = fun left right ->
-  let open Tree in let open Change in
-  let cost list = Diff.cost (Tree.Many list) in
-  match left, right with
-  | [], right -> List.map (fun sexp -> One (Addition sexp)) right
-  | left, [] -> List.map (fun sexp -> One (Deletion sexp)) left
-  | x :: xs, y :: ys when x = y ->
-     (*
-        The fact that when x = y we declare it a non-change without considering
-        other options makes this diffing algorithm "impatient" (in patdiff sense).
-        On one hand this makes our naive algorithm probably linear time in the
-        common case of no diff (since we recurse only once), on the other hand
-        this might lead to not the best looking diffs, e.g.:
-          (a x x x a b b a) vs. (a b b a) => (a -x -x -x -a b b a)
-      *)
-     One (Equality x) :: diff xs ys
-  | Sexp.List ls as x :: xs, (Sexp.List ms as y) :: ys ->
-      minimize ~cost [
-        One (Deletion x) :: diff xs right;
-        One (Addition y) :: diff left ys;
-        Many (diff ls ms) :: diff xs ys;
-      ]
-  | x :: xs, y :: ys ->
-      minimize ~cost [
-        One (Deletion x) :: diff xs right;
-        One (Addition y) :: diff left ys;
-        One (Deletion x) :: One (Addition y) :: diff xs ys;
-      ]
-
 module Test = struct
-  let (=>) diffs string =
-    Test.(=>) (String.concat " " (List.map Diff.debug diffs)) string
+  let (=>) diff string = Test.(=>) (Diff.debug diff) string
   let (!) _ = ()
 
   open Sexp
@@ -186,17 +189,24 @@ module Test = struct
   let a, b, c = Atom "a", Atom "b", Atom "c"
   let x, y, z = Atom "x", Atom "y", Atom "z"
 
-  let () = !"Test diff"
-    ; diff [] [] => ""
-    ; diff [] [a; b] => "+a +b"
-    ; diff [a; b] [] => "-a -b"
-    ; diff [a; b] [a] => "a -b"
-    ; diff [a; b] [a; b] => "a b"
-    ; diff [a; x; a; b; b; a] [a; b; b; a] => "a -x -a b b a"
-    ; diff [List [a; List [b; c]]] [List [a; List [b]]] => "(a (b -c))"
+  let diff = Diff.create
 
+  let () = !"Test diff"
+    ; diff a a => "a"
+    ; diff a b => "-a +b"
+    ; diff (List [a]) b => "-(a) +b"
+    ; diff a (List [b]) => "-a +(b)"
+    ; diff (List []) (List []) => "()"
+    ; diff (List [a]) (List [a]) => "(a)"
+    ; diff (List []) (List [a]) => "(+a)"
+    ; diff (List [a]) (List []) => "(-a)"
+    ; diff (List [a; b]) (List [a]) => "(a -b)"
+    ; diff (List [a]) (List [a; b]) => "(a +b)"
+    ; diff (List [a; x; a; b; b; a]) (List [a; b; b; a]) => "(a -x -a b b a)"
+
+  let () = print_endline ""
     ; print_endline @@ Diff.to_string
-        (Tree.Many (diff [List [a; List [b; c]]] [List [a; List [x; y]]]))
+        (diff (List [a; List [b; c]]) (List [a; List [x; y]]))
     ; print_endline @@ Diff.to_string
-        (Tree.Many (diff [List [a; z]] [List [a; List [x; y]]]))
+        (diff (List [a; z]) (List [a; List [x; y]]))
 end
