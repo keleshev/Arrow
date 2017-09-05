@@ -1,4 +1,5 @@
 
+let (=>) left right = print_char (if left = right then '.' else 'F')
 let sum = List.fold_left (+) 0
 let (>>) f g x = g (f x)
 let const x _ = x
@@ -43,18 +44,14 @@ module Sexp = struct
     | List l -> fprintf f "@[<hv 1>(%a)@]" (format_list format) l
 
   let to_string = Format.asprintf "%a" format
-end
 
-module Test = struct
-  open Sexp
+  module Test = struct
+    let a, b, c = Atom "a", Atom "b", Atom "c"
 
-  let (=>) left right = print_char (if left = right then '.' else 'F')
-
-  let a, b, c = Atom "a", Atom "b", Atom "c"
-
-  let () = ()
-    ; to_string (List [a; List [b; c]; List [a; List [b]]]) =>
-        "(a (b c) (a (b)))"
+    let () = ()
+      ; to_string (List [a; List [b; c]; List [a; List [b]]]) =>
+          "(a (b c) (a (b)))"
+  end
 end
 
 let minimize ~cost (head :: tail) =
@@ -131,6 +128,23 @@ module Diff = struct
     | One change -> Change.debug change
     | Many list -> "(" ^ String.concat " " (List.map debug list) ^ ")"
 
+  module Test1 = struct
+    let a, b, c = Sexp.(Atom "a", Atom "b", Atom "c")
+
+    let () = ()
+      ; cost Tree.(Many [
+          One Change.(Equality a);
+          One Change.(Deletion b);
+          Many [One Change.(Addition c)];
+        ]) => 3
+
+    let () = ()
+      ; debug Tree.(Many [
+          One Change.(Equality a);
+          Many [One Change.(Equality b); One Change.(Deletion c)];
+        ]) => "(a (b -c))"
+  end
+
   open Change
   open Tree
   open Sexp
@@ -160,53 +174,32 @@ module Diff = struct
           One (Addition y) :: diff_list left ys;
           One (Mutation {deletion=x; addition=y}) :: diff_list xs ys;
         ]
-end
 
-module Test = struct
-  let (=>) left right = print_char (if left = right then '.' else 'F')
-  let a, b, c = Sexp.(Atom "a", Atom "b", Atom "c")
+  module Test = struct
+    open Sexp
 
-  let () = let open Change in ()
-    ; Diff.cost Tree.(Many [
-        One (Equality a);
-        One (Deletion b);
-        Many [One (Addition c)];
-      ]) => 3
+    let a, b, c = Atom "a", Atom "b", Atom "c"
+    let x, y, z = Atom "x", Atom "y", Atom "z"
 
-  let () = let open Change in ()
-    ; Diff.debug Tree.(Many [
-        One (Equality a);
-        Many [One (Equality b); One (Deletion c)];
-      ]) => "(a (b -c))"
-end
+    let diff = create
 
-module Test = struct
-  let (=>) diff string = Test.(=>) (Diff.debug diff) string
-  let (!) _ = ()
+    let () = ()
+      ; diff a a => "a"
+      ; diff a b => "-a +b"
+      ; diff (List [a]) b => "-(a) +b"
+      ; diff a (List [b]) => "-a +(b)"
+      ; diff (List []) (List []) => "()"
+      ; diff (List [a]) (List [a]) => "(a)"
+      ; diff (List []) (List [a]) => "(+a)"
+      ; diff (List [a]) (List []) => "(-a)"
+      ; diff (List [a; b]) (List [a]) => "(a -b)"
+      ; diff (List [a]) (List [a; b]) => "(a +b)"
+      ; diff (List [a; x; a; b; b; a]) (List [a; b; b; a]) => "(a -x -a b b a)"
 
-  open Sexp
-
-  let a, b, c = Atom "a", Atom "b", Atom "c"
-  let x, y, z = Atom "x", Atom "y", Atom "z"
-
-  let diff = Diff.create
-
-  let () = !"Test diff"
-    ; diff a a => "a"
-    ; diff a b => "-a +b"
-    ; diff (List [a]) b => "-(a) +b"
-    ; diff a (List [b]) => "-a +(b)"
-    ; diff (List []) (List []) => "()"
-    ; diff (List [a]) (List [a]) => "(a)"
-    ; diff (List []) (List [a]) => "(+a)"
-    ; diff (List [a]) (List []) => "(-a)"
-    ; diff (List [a; b]) (List [a]) => "(a -b)"
-    ; diff (List [a]) (List [a; b]) => "(a +b)"
-    ; diff (List [a; x; a; b; b; a]) (List [a; b; b; a]) => "(a -x -a b b a)"
-
-  let () = print_endline ""
-    ; print_endline @@ Diff.to_string
-        (diff (List [a; List [b; c]]) (List [a; List [x; y]]))
-    ; print_endline @@ Diff.to_string
-        (diff (List [a; z]) (List [a; List [x; y]]))
+    let () = print_endline ""
+      ; print_endline @@ to_string
+          (diff (List [a; List [b; c]]) (List [a; List [x; y]]))
+      ; print_endline @@ to_string
+          (diff (List [a; z]) (List [a; List [x; y]]))
+  end
 end
