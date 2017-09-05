@@ -4,8 +4,6 @@ let sum = List.fold_left (+) 0
 let (>>) f g x = g (f x)
 let const x _ = x
 let id x = x
-(* let join = String.concat " " *)
-(* let parenthesize = Printf.sprintf "(%s)" *)
 
 let fprintf = Format.fprintf
 let format_list list =
@@ -26,7 +24,7 @@ module Color = struct
 
     let red c = create 31 c
     let green c = create 32 c
-    let yellow = create 33
+    let yellow c = create 33 c
   end
 end
 
@@ -145,24 +143,22 @@ module Diff = struct
         ]) => "(a (b -c))"
   end
 
-  open Change
-  open Tree
-  open Sexp
-
   let rec create: Sexp.t -> Sexp.t -> Change.t Tree.t = fun left right ->
+    let open Change in let open Tree in let open Sexp in
     match left, right with
     | x, y when x = y -> One (Equality x)
     | List xs, List ys -> Many (diff_list xs ys)
     | deletion, addition -> One (Mutation {deletion; addition})
 
   and diff_list: Sexp.t list -> Sexp.t list -> Change.t Tree.t list =
+    let open Change in let open Tree in let open Sexp in
     fun left right ->
     match left, right with
     | [], right -> List.map (fun sexp -> One (Addition sexp)) right
     | left, [] -> List.map (fun sexp -> One (Deletion sexp)) left
     | x :: xs, y :: ys when x = y ->
         One (Equality x) :: diff_list xs ys
-    | (Sexp.List ls as x) :: xs, (Sexp.List ms as y) :: ys ->
+    | (List ls as x) :: xs, (List ms as y) :: ys ->
         minimize ~cost:cost_list [
           One (Deletion x) :: diff_list xs right;
           One (Addition y) :: diff_list left ys;
@@ -176,14 +172,14 @@ module Diff = struct
         ]
 
   module Test = struct
-    open Sexp
+    let (=>) diff string = debug diff => string
 
-    let a, b, c = Atom "a", Atom "b", Atom "c"
-    let x, y, z = Atom "x", Atom "y", Atom "z"
+    let a, b, c = Sexp.(Atom "a", Atom "b", Atom "c")
+    let x, y, z = Sexp.(Atom "x", Atom "y", Atom "z")
 
     let diff = create
 
-    let () = ()
+    let () = let open Sexp in ()
       ; diff a a => "a"
       ; diff a b => "-a +b"
       ; diff (List [a]) b => "-(a) +b"
@@ -198,8 +194,8 @@ module Diff = struct
 
     let () = print_endline ""
       ; print_endline @@ to_string
-          (diff (List [a; List [b; c]]) (List [a; List [x; y]]))
+          (diff Sexp.(List [a; List [b; c]]) Sexp.(List [a; List [x; y]]))
       ; print_endline @@ to_string
-          (diff (List [a; z]) (List [a; List [x; y]]))
+          (diff Sexp.(List [a; z]) Sexp.(List [a; List [x; y]]))
   end
 end
