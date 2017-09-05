@@ -1,0 +1,6 @@
+(jbuild_version 1)
+
+(library
+ ((name        arrow)
+  (libraries (base))
+  (public_name arrow)))

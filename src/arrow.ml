@@ -1,4 +1,3 @@
-
 let sum = List.fold_left (+) 0
 let (>>) f g x = g (f x)
 let const x _ = x
@@ -25,12 +24,12 @@ module Color = struct
 
     let red c = create 31 c
     let green c = create 32 c
-    let yellow = create 33
+    let yellow c = create 33 c
   end
 end
 
 module Sexp = struct
-  type t = Atom of string | List of t list
+  type t = Base.Sexp.t = Atom of string | List of t list
 
   let rec fold ~atom ~list = function
     | Atom a -> atom a
@@ -43,18 +42,6 @@ module Sexp = struct
     | List l -> fprintf f "@[<hv 1>(%a)@]" (format_list format) l
 
   let to_string = Format.asprintf "%a" format
-end
-
-module Test = struct
-  open Sexp
-
-  let (=>) left right = print_char (if left = right then '.' else 'F')
-
-  let a, b, c = Atom "a", Atom "b", Atom "c"
-
-  let () = ()
-    ; to_string (List [a; List [b; c]; List [a; List [b]]]) =>
-        "(a (b c) (a (b)))"
 end
 
 let minimize ~cost (head :: tail) =
@@ -162,36 +149,36 @@ module Diff = struct
         ]
 end
 
-module Test = struct
+module Tests = struct
   let (=>) left right = print_char (if left = right then '.' else 'F')
+
   let a, b, c = Sexp.(Atom "a", Atom "b", Atom "c")
+  let x, y, z = Sexp.(Atom "x", Atom "y", Atom "z")
 
-  let () = let open Change in ()
-    ; Diff.cost Tree.(Many [
-        One (Equality a);
-        One (Deletion b);
-        Many [One (Addition c)];
-      ]) => 3
+  let () =
+    Sexp.to_string (List [a; List [b; c]; List [a; List [b]]]) =>
+      "(a (b c) (a (b)))"
 
-  let () = let open Change in ()
-    ; Diff.debug Tree.(Many [
-        One (Equality a);
-        Many [One (Equality b); One (Deletion c)];
-      ]) => "(a (b -c))"
-end
+  let () = let open Change in
+    Diff.cost Tree.(Many [
+      One (Equality a);
+      One (Deletion b);
+      Many [One (Addition c)];
+    ]) => 3
 
-module Test = struct
-  let (=>) diff string = Test.(=>) (Diff.debug diff) string
-  let (!) _ = ()
+  let () = let open Change in
+    Diff.debug Tree.(Many [
+      One (Equality a);
+      Many [One (Equality b); One (Deletion c)];
+    ]) => "(a (b -c))"
+
+  let (=>) diff string = Diff.debug diff => string
 
   open Sexp
 
-  let a, b, c = Atom "a", Atom "b", Atom "c"
-  let x, y, z = Atom "x", Atom "y", Atom "z"
-
   let diff = Diff.create
 
-  let () = !"Test diff"
+  let () = ()
     ; diff a a => "a"
     ; diff a b => "-a +b"
     ; diff (List [a]) b => "-(a) +b"
