@@ -1,0 +1,10 @@
+(jbuild_version 1)
+
+(executables
+ ((names (test_arrow))
+  (libraries (arrow))))
+
+(alias
+ ((name    runtest)
+  (deps    (test_arrow.exe))
+  (action  (run ${<}))))
