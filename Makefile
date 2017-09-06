@@ -1,6 +1,8 @@
-.PHONY: default clean test tree
+.PHONY: build clean test tree
 
-default:
+default: test
+
+build:
 	jbuilder build @install
 
 clean:
