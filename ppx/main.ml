@@ -11,6 +11,12 @@ let expression ~loc desc = {pexp_desc=desc; pexp_loc=loc; pexp_attributes=[]}
 
 let unit ~loc = expression ~loc (Pexp_construct ({txt=Lident "()"; loc}, None))
 
+let int ~loc n =
+  expression ~loc (Pexp_constant (Pconst_integer (string_of_int n, None)))
+
+let int_pair ~loc (x, y) =
+  expression ~loc (Pexp_tuple [int ~loc x; int ~loc y])
+
 let rec sequence = function
   | [] -> unit ~loc:Location.none
   | [expr] -> expr
@@ -24,9 +30,11 @@ let call ~loc path params =
     expression ~loc (Pexp_ident {txt=ident path; loc}), params))
 
 module Runtime = struct
-  let register ~loc ~test =
+  let register ~loc ~test ~header ~body =
     call ~loc "Arrow.Runtime.register" [
       Labelled "file", expression ~loc (Pexp_ident {txt=ident "__FILE__"; loc});
+      Labelled "header", int_pair ~loc header;
+      Labelled "body", int_pair ~loc body;
       Labelled "test", test;
     ]
 end
@@ -39,9 +47,9 @@ let getenv_mapper argv =
         begin match payload with
         | PStr items ->
 
-            let test_expressions = items |> List.map (function
+            let test_bindings = items |> List.map (function
               | {pstr_desc=Pstr_value (_rec, bindings); _} ->
-                  bindings |> List.map (fun {pvb_expr; pvb_pat; _} -> pvb_expr)
+                  bindings |> List.map (fun x -> x)
               | _ -> failwith "expected structure-level let-bindings (Pstr_value)")
               |> List.flatten
             in
@@ -63,16 +71,22 @@ let getenv_mapper argv =
               pexp_attributes=[];
             } in
 
-            let test_thunks = List.map thunk test_expressions in
             {
               pstr_loc;
               pstr_desc=Pstr_value (Nonrecursive, [{
                 pvb_pat=unit_pattern;
                 pvb_attributes=[];
                 pvb_loc=loc;
-                pvb_expr=sequence (test_thunks |> List.map (fun thunk ->
-                  (Runtime.register ~loc ~test:thunk)
-                ));
+                pvb_expr=sequence (test_bindings |> List.map (
+                  fun {pvb_pat; pvb_expr; _}  ->
+                    Runtime.register ~loc
+                      ~test:(thunk pvb_expr)
+                      ~header:(pvb_pat.ppat_loc.loc_start.pos_lnum,
+                               pvb_pat.ppat_loc.loc_end.pos_lnum)
+                      ~body:(pvb_expr.pexp_loc.loc_start.pos_lnum,
+                             pvb_expr.pexp_loc.loc_end.pos_lnum)
+                  )
+                );
               }]);
             }
         | _ -> failwith "hai"

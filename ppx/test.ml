@@ -1,6 +1,5 @@
  let%test "name" =
   3 + 1 => 4
-; hai
 
 and "name 2" = 1 + 2 => 3
 
