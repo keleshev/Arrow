@@ -17,15 +17,9 @@ module Memoized = struct
     (Lazy.force f) x
 end
 
-open Ast_mapper
-open Ast_helper
-open Asttypes
 open Parsetree
-open Longident
 
-let getenv s = try Sys.getenv s with Not_found -> ""
-
-let expression ~loc desc = {pexp_desc=desc; pexp_loc=loc; pexp_attributes=[]}
+let expression = Ast_helper.Exp.mk
 
 let unit ~loc = expression ~loc (Pexp_construct ({txt=Lident "()"; loc}, None))
 
@@ -38,7 +32,7 @@ let int_pair ~loc (x, y) =
 let rec sequence = function
   | [] -> unit ~loc:Location.none
   | [expr] -> expr
-  | {pexp_desc; pexp_loc; _} as expr :: tail ->
+  | {pexp_loc; _} as expr :: tail ->
       expression ~loc:pexp_loc (Pexp_sequence (expr, sequence tail))
 
 let ident = Longident.parse
@@ -60,8 +54,8 @@ module Runtime = struct
     ]
 end
 
-let getenv_mapper argv =
-  { default_mapper with structure_item = fun mapper item ->
+let mapper argv =
+  { Ast_mapper.default_mapper with structure_item = fun mapper item ->
       match item with
       | {pstr_desc=Pstr_extension (({txt=("test" | "arrow.test"); loc}, payload),
                                    _attrs); pstr_loc} ->
@@ -107,7 +101,8 @@ let getenv_mapper argv =
             }
         | _ -> failwith "hai"
         end
-      | other -> default_mapper.structure_item mapper item
+      | other -> Ast_mapper.default_mapper.structure_item mapper item
   }
 
-let () = register "getenv" getenv_mapper
+let () =
+  Ast_mapper.register "arrow" mapper
