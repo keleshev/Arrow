@@ -1,4 +1,22 @@
 
+module Hashtbl = MoreLabels.Hashtbl
+
+module Memoized = struct
+
+  let create ?(size=8) f =
+    let table = Hashtbl.create size in
+    fun argument ->
+      try Hashtbl.find table argument
+      with Not_found ->
+        let result = f argument in
+        Hashtbl.replace table ~key:argument ~data:result;
+        result
+
+  let fix ?size f_nonrec x =
+    let rec f = lazy (create ?size (fun x -> f_nonrec (Lazy.force f) x)) in
+    (Lazy.force f) x
+end
+
 open Ast_mapper
 open Ast_helper
 open Asttypes
@@ -29,12 +47,15 @@ let call ~loc path params =
   expression ~loc (Pexp_apply (
     expression ~loc (Pexp_ident {txt=ident path; loc}), params))
 
+let array ~loc exprs = expression ~loc (Pexp_array exprs)
+
 module Runtime = struct
   let register ~loc ~test ~header ~body =
     call ~loc "Arrow.Runtime.register" [
       Labelled "file", expression ~loc (Pexp_ident {txt=ident "__FILE__"; loc});
       Labelled "header", int_pair ~loc header;
       Labelled "body", int_pair ~loc body;
+      Labelled "source", array ~loc [];
       Labelled "test", test;
     ]
 end
@@ -54,11 +75,6 @@ let getenv_mapper argv =
               |> List.flatten
             in
             ();
-            let _array exprs = {
-              pexp_desc=Pexp_array exprs;
-              pexp_loc=loc;
-              pexp_attributes=[];
-            } in
             let loc = pstr_loc in
             let unit_pattern = {
               ppat_desc=Ppat_construct ({txt=Lident "()"; loc;}, None);
