@@ -17,92 +17,123 @@ module Memoized = struct
     (Lazy.force f) x
 end
 
-open Parsetree
+module Ppx = struct
 
-let expression = Ast_helper.Exp.mk
+  let read_lines filename = (* TODO: tail rec, handle exceptions *)
+    let rec go channel =
+      match input_line channel with
+      | line -> line :: go channel
+      | exception End_of_file -> []
+    in
+    Array.of_list (go (open_in filename))
 
-let unit ~loc = expression ~loc (Pexp_construct ({txt=Lident "()"; loc}, None))
+  let read_lines_memoized = Memoized.create read_lines
 
-let int ~loc n =
-  expression ~loc (Pexp_constant (Pconst_integer (string_of_int n, None)))
+  open Parsetree
 
-let int_pair ~loc (x, y) =
-  expression ~loc (Pexp_tuple [int ~loc x; int ~loc y])
+  module Pattern = struct
+    let create = Ast_helper.Pat.mk
 
-let rec sequence = function
-  | [] -> unit ~loc:Location.none
-  | [expr] -> expr
-  | {pexp_loc; _} as expr :: tail ->
-      expression ~loc:pexp_loc (Pexp_sequence (expr, sequence tail))
+    let unit ~loc = create ~loc (Ppat_construct ({txt=Lident "()"; loc}, None))
+  end
 
-let ident = Longident.parse
+  module Expression = struct
+    let create = Ast_helper.Exp.mk
 
-let call ~loc path params =
-  expression ~loc (Pexp_apply (
-    expression ~loc (Pexp_ident {txt=ident path; loc}), params))
+    let constructor ~loc name =
+      create ~loc (Pexp_construct ({txt=Longident.parse name; loc}, None))
 
-let array ~loc exprs = expression ~loc (Pexp_array exprs)
+    let ident ~loc name =
+      create ~loc (Pexp_ident {txt=Longident.parse name; loc})
 
-module Runtime = struct
-  let register ~loc ~test ~header ~body =
-    call ~loc "Arrow.Runtime.register" [
-      Labelled "file", expression ~loc (Pexp_ident {txt=ident "__FILE__"; loc});
-      Labelled "header", int_pair ~loc header;
-      Labelled "body", int_pair ~loc body;
-      Labelled "source", array ~loc [];
-      Labelled "test", test;
-    ]
+    let unit ~loc = constructor ~loc "()"
+    let string ~loc s = create ~loc (Pexp_constant (Pconst_string (s, None)))
+
+    let int ~loc n =
+      create ~loc (Pexp_constant (Pconst_integer (string_of_int n, None)))
+
+    let int_pair ~loc (x, y) = create ~loc (Pexp_tuple [int ~loc x; int ~loc y])
+
+    let thunk ~loc expr =
+      create ~loc (Pexp_fun (Nolabel, None, Pattern.unit ~loc, expr))
+
+    let rec sequence = function
+      | [] -> unit ~loc:Location.none
+      | [expr] -> expr
+      | {pexp_loc; _} as expr :: tail ->
+          create ~loc:pexp_loc (Pexp_sequence (expr, sequence tail))
+
+    let call ~loc path params =
+      create ~loc (Pexp_apply (ident ~loc path, params))
+
+    let array ~loc exprs = create ~loc (Pexp_array exprs)
+  end
+
+  module Runtime = struct
+    let register ~loc ~test ~header ~body =
+      let (start, _), (_, finish) = header, body in
+      let length = finish - start in
+      let filename = loc.Location.loc_start.pos_fname in
+      (* TODO: What if this filename is different from the __FILE__ below? How? *)
+      let all_lines = read_lines_memoized filename in
+      (* TODO: Array.sub can raise *)
+      let lines = Array.to_list (Array.sub all_lines (start - 1) (length + 1)) in
+      let module E = Expression in
+      let source = List.map (E.string ~loc) lines in
+      E.call ~loc "Arrow.Runtime.register" [
+        Labelled "file", E.ident ~loc "__FILE__";
+        Labelled "header", E.int_pair ~loc header;
+        Labelled "body", E.int_pair ~loc body;
+        Labelled "source", E.array ~loc source;
+        Labelled "test", test;
+      ]
+  end
+
+
+  let mapper argv =
+    { Ast_mapper.default_mapper with structure_item = fun mapper item ->
+        match item with
+        (* The location `loc` of the extension point "%test" is probably
+           the best location to point the user to in case something wrong
+           goes with generated code. *)
+        | {
+            pstr_desc=Pstr_extension (({
+              txt="test"|"arrow.test";
+              loc;
+            }, payload), _);
+            _;
+          } ->
+          begin match payload with
+          | PStr items ->
+
+              let test_bindings = items |> List.map (function
+                | {pstr_desc=Pstr_value (_rec, bindings); _} ->
+                    bindings |> List.map (fun x -> x)
+                | _ -> failwith "expected structure-level let-bindings (Pstr_value)")
+                |> List.flatten
+              in
+              {
+                pstr_loc=loc;
+                pstr_desc=Pstr_value (Nonrecursive, [{
+                  pvb_pat=Pattern.unit ~loc;
+                  pvb_attributes=[];
+                  pvb_loc=loc;
+                  pvb_expr=Expression.sequence (test_bindings |> List.map (
+                    fun {pvb_pat; pvb_expr; _}  ->
+                      Runtime.register ~loc
+                        ~test:(Expression.thunk ~loc pvb_expr)
+                        ~header:(pvb_pat.ppat_loc.loc_start.pos_lnum,
+                                 pvb_pat.ppat_loc.loc_end.pos_lnum)
+                        ~body:(pvb_expr.pexp_loc.loc_start.pos_lnum,
+                               pvb_expr.pexp_loc.loc_end.pos_lnum)
+                    )
+                  );
+                }]);
+              }
+          | _ -> failwith "hai"
+          end
+        | other -> Ast_mapper.default_mapper.structure_item mapper item
+    }
+
+  let () = Ast_mapper.register "arrow" mapper
 end
-
-let mapper argv =
-  { Ast_mapper.default_mapper with structure_item = fun mapper item ->
-      match item with
-      | {pstr_desc=Pstr_extension (({txt=("test" | "arrow.test"); loc}, payload),
-                                   _attrs); pstr_loc} ->
-        begin match payload with
-        | PStr items ->
-
-            let test_bindings = items |> List.map (function
-              | {pstr_desc=Pstr_value (_rec, bindings); _} ->
-                  bindings |> List.map (fun x -> x)
-              | _ -> failwith "expected structure-level let-bindings (Pstr_value)")
-              |> List.flatten
-            in
-            ();
-            let loc = pstr_loc in
-            let unit_pattern = {
-              ppat_desc=Ppat_construct ({txt=Lident "()"; loc;}, None);
-              ppat_loc=loc;
-              ppat_attributes=[];
-            } in
-            let thunk expr = {
-              pexp_desc=Pexp_fun (Nolabel, None, unit_pattern, expr);
-              pexp_loc=loc;
-              pexp_attributes=[];
-            } in
-
-            {
-              pstr_loc;
-              pstr_desc=Pstr_value (Nonrecursive, [{
-                pvb_pat=unit_pattern;
-                pvb_attributes=[];
-                pvb_loc=loc;
-                pvb_expr=sequence (test_bindings |> List.map (
-                  fun {pvb_pat; pvb_expr; _}  ->
-                    Runtime.register ~loc
-                      ~test:(thunk pvb_expr)
-                      ~header:(pvb_pat.ppat_loc.loc_start.pos_lnum,
-                               pvb_pat.ppat_loc.loc_end.pos_lnum)
-                      ~body:(pvb_expr.pexp_loc.loc_start.pos_lnum,
-                             pvb_expr.pexp_loc.loc_end.pos_lnum)
-                  )
-                );
-              }]);
-            }
-        | _ -> failwith "hai"
-        end
-      | other -> Ast_mapper.default_mapper.structure_item mapper item
-  }
-
-let () =
-  Ast_mapper.register "arrow" mapper
