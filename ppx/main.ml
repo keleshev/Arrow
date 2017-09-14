@@ -89,51 +89,51 @@ module Ppx = struct
       ]
   end
 
+  module Mapper = struct
+    let structure_item mapper = function
+      | {
+          pstr_desc=Pstr_extension (({
+            txt=("test" | "arrow.test");
+	    (* Location of the extension point itself (%test) is probably the
+	       best place to point the user to in case of problems with the
+               generated code. *)
+            loc;
+          }, payload), _);
+          _;
+        } ->
+        begin match payload with
+        | PStr items ->
 
-  let mapper argv =
-    { Ast_mapper.default_mapper with structure_item = fun mapper item ->
-        match item with
-        (* The location `loc` of the extension point "%test" is probably
-           the best location to point the user to in case something wrong
-           goes with generated code. *)
-        | {
-            pstr_desc=Pstr_extension (({
-              txt="test"|"arrow.test";
-              loc;
-            }, payload), _);
-            _;
-          } ->
-          begin match payload with
-          | PStr items ->
+            let test_bindings = items |> List.map (function
+              | {pstr_desc=Pstr_value (_rec, bindings); _} -> bindings
+              | _ ->
+                  failwith "expected structure-level let-bindings (Pstr_value)")
+              |> List.flatten
+            in
+            {
+              pstr_loc=loc;
+              pstr_desc=Pstr_value (Nonrecursive, [{
+                pvb_pat=Pattern.unit ~loc;
+                pvb_attributes=[];
+                pvb_loc=loc;
+                pvb_expr=Expression.sequence (test_bindings |> List.map (
+                  fun {pvb_pat; pvb_expr; _}  ->
+                    Runtime.register ~loc
+                      ~test:(Expression.thunk ~loc pvb_expr)
+                      ~header:(pvb_pat.ppat_loc.loc_start.pos_lnum,
+                               pvb_pat.ppat_loc.loc_end.pos_lnum)
+                      ~body:(pvb_expr.pexp_loc.loc_start.pos_lnum,
+                             pvb_expr.pexp_loc.loc_end.pos_lnum)
+                  )
+                );
+              }]);
+            }
+        | _ -> failwith "hai"
+        end
+      | other -> Ast_mapper.default_mapper.structure_item mapper other
 
-              let test_bindings = items |> List.map (function
-                | {pstr_desc=Pstr_value (_rec, bindings); _} ->
-                    bindings |> List.map (fun x -> x)
-                | _ -> failwith "expected structure-level let-bindings (Pstr_value)")
-                |> List.flatten
-              in
-              {
-                pstr_loc=loc;
-                pstr_desc=Pstr_value (Nonrecursive, [{
-                  pvb_pat=Pattern.unit ~loc;
-                  pvb_attributes=[];
-                  pvb_loc=loc;
-                  pvb_expr=Expression.sequence (test_bindings |> List.map (
-                    fun {pvb_pat; pvb_expr; _}  ->
-                      Runtime.register ~loc
-                        ~test:(Expression.thunk ~loc pvb_expr)
-                        ~header:(pvb_pat.ppat_loc.loc_start.pos_lnum,
-                                 pvb_pat.ppat_loc.loc_end.pos_lnum)
-                        ~body:(pvb_expr.pexp_loc.loc_start.pos_lnum,
-                               pvb_expr.pexp_loc.loc_end.pos_lnum)
-                    )
-                  );
-                }]);
-              }
-          | _ -> failwith "hai"
-          end
-        | other -> Ast_mapper.default_mapper.structure_item mapper item
-    }
+    let it argv = Ast_mapper.{default_mapper with structure_item}
+  end
 
-  let () = Ast_mapper.register "arrow" mapper
+  let () = Ast_mapper.register "arrow" Mapper.it
 end
