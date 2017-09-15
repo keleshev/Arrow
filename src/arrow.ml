@@ -1,7 +1,14 @@
 module Hashtbl = MoreLabels.Hashtbl
-let sum = List.fold_left (+) 0
-let (>>) f g x = g (f x)
-let const x _ = x
+
+module Shim = struct
+  let sum = List.fold_left (+) 0
+  let (>>) f g x = g (f x)
+  let const x _ = x
+
+  module Ref = struct
+    let replace t f = t := f !t
+  end
+end open Shim
 
 let fprintf = Format.fprintf
 let format_list list = Format.pp_print_list ~pp_sep:Format.pp_print_space list
@@ -38,6 +45,7 @@ module Color = struct
   let green c = create 32 c
   let yellow c = create 33 c
 end
+
 
 module Sexp = struct
   type t = Base.Sexp.t = Atom of string | List of t list
@@ -162,4 +170,27 @@ module Diff = struct
     | List xs, List ys -> Many (diff_list (xs, ys))
     | deletion, addition -> One (Mutation {deletion; addition})
 
+end
+
+module Runtime = struct
+  (* Arrow.Runtime.register ~file:__FILE__ ~header:(1, 1) ~body:(2, 2)
+    ~source:[|" let%test \"name\" =";"  3 + 1 => 4"|]
+    ~thunk:(fun ()  -> (3 + 1) => 4);
+   *)
+
+  module Test = struct
+    type t = {
+      file: string;
+      header: int * int;
+      body: int * int;
+      source: string array;
+      thunk: unit -> unit;
+    }
+
+    let repo: t list ref = ref []
+  end
+
+  let register ~file ~header ~body ~source ~thunk =
+    let test = Test.{file; header; body; source; thunk} in
+    Ref.replace Test.repo (List.cons test)
 end

@@ -85,7 +85,7 @@ module Ppx = struct
         Labelled "header", E.int_pair ~loc header;
         Labelled "body", E.int_pair ~loc body;
         Labelled "source", E.array ~loc source;
-        Labelled "test", test;
+        Labelled "thunk", test;
       ]
   end
 
