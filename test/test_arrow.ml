@@ -44,6 +44,16 @@ let () = ()
   ; diff (List [a]) (List [a; b]) => "(a +b)"
   ; diff (List [a; x; a; b; b; a]) (List [a; b; b; a]) => "(a -x -a b b a)"
 
+let () =
+  (* Test that this doesn't take infinite amount of time *)
+  let l = Sexp.List [a; b; c] in
+  let m = Sexp.List [x; y; z] in
+  let l = Sexp.List [l; m; l; m; l; m] in
+  let m = Sexp.List [l; m; l; m; l; m] in
+  let l = Sexp.List [l; m; l; m; l; m] in
+  let m = Sexp.List [l; m; l; m; l; m] in
+  diff (List [l; m; l; m]) (List [m; l; m; l]) |> ignore
+
 let () = print_endline ""
   ; print_endline @@ Diff.to_string
       (diff (List [a; List [b; c]]) (List [a; List [x; y]]))

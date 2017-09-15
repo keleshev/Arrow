@@ -1,9 +1,32 @@
+module Hashtbl = MoreLabels.Hashtbl
 let sum = List.fold_left (+) 0
 let (>>) f g x = g (f x)
 let const x _ = x
 
 let fprintf = Format.fprintf
 let format_list list = Format.pp_print_list ~pp_sep:Format.pp_print_space list
+
+module Y_combinator = struct
+  let fix f_nonrec x =
+    let rec f = lazy (fun x -> f_nonrec (Lazy.force f) x) in
+    (Lazy.force f) x
+end
+
+module Memoized = struct
+
+  let create ?(size=8) f =
+    let table = Hashtbl.create size in
+    fun argument ->
+      try Hashtbl.find table argument
+      with Not_found ->
+        let result = f argument in
+        Hashtbl.replace table ~key:argument ~data:result;
+        result
+
+  let fix ?size f_nonrec x =
+    let rec f = lazy (create ?size (fun x -> f_nonrec (Lazy.force f) x)) in
+    (Lazy.force f) x
+end
 
 module Color = struct
   let escape = Format.sprintf "\027[%dm"
@@ -110,31 +133,33 @@ module Diff = struct
   open Tree
   open Sexp
 
-  let rec create: Sexp.t -> Sexp.t -> Change.t Tree.t = fun left right ->
-    match left, right with
-    | x, y when x = y -> One (Equality x)
-    | List xs, List ys -> Many (diff_list xs ys)
-    | deletion, addition -> One (Mutation {deletion; addition})
-
-  and diff_list: Sexp.t list -> Sexp.t list -> Change.t Tree.t list =
-    fun left right ->
-    match left, right with
+  let diff_list_nonrec rec' = function
     | [], right -> List.map (fun sexp -> One (Addition sexp)) right
     | left, [] -> List.map (fun sexp -> One (Deletion sexp)) left
     | x :: xs, y :: ys when x = y ->
         (* When x = y we match impatiently (think patdiff) in order to optimize
            our naive algorith in the common case of little diff *)
-        One (Equality x) :: diff_list xs ys
-    | (Sexp.List ls as x) :: xs, (Sexp.List ms as y) :: ys ->
+        One (Equality x) :: rec' (xs, ys)
+    | (Sexp.List ls as x :: xs as left), (Sexp.List ms as y :: ys as right) ->
         minimize ~cost:cost_list [
-          One (Deletion x) :: diff_list xs right;
-          One (Addition y) :: diff_list left ys;
-          Many (diff_list ls ms) :: diff_list xs ys;
+          One (Deletion x) :: rec' (xs, right);
+          One (Addition y) :: rec' (left, ys);
+          Many (rec' (ls, ms)) :: rec' (xs, ys);
         ]
-    | x :: xs, y :: ys ->
+    | (x :: xs as left), (y :: ys as right) ->
         minimize ~cost:cost_list [
-          One (Deletion x) :: diff_list xs right;
-          One (Addition y) :: diff_list left ys;
-          One (Mutation {deletion=x; addition=y}) :: diff_list xs ys;
+          One (Deletion x) :: rec' (xs, right);
+          One (Addition y) :: rec' (left, ys);
+          One (Deletion x) :: One (Addition y) :: rec' (xs, ys);
         ]
+
+  let diff_list_slow = Y_combinator.fix diff_list_nonrec
+
+  let create: Sexp.t -> Sexp.t -> Change.t Tree.t = fun left right ->
+    let diff_list = Memoized.fix diff_list_nonrec in
+    match left, right with
+    | x, y when x = y -> One (Equality x)
+    | List xs, List ys -> Many (diff_list (xs, ys))
+    | deletion, addition -> One (Mutation {deletion; addition})
+
 end
